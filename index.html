@@ -609,40 +609,63 @@
   document.getElementById('metodo-bizum').addEventListener('click', () => seleccionarMetodo('bizum'));
 
   // Avisa a la hoja de cálculo para que reste el stock comprado
-  async function descontarStockEnHoja(){
-    if(URL_HOJA.includes("PEGA_AQUI")) return;
-    const cuerpo = {
-      carrito: carrito.map(item => ({ id: item.id, cantidad: item.cantidad }))
-    };
-    try{
-      await fetch(URL_HOJA, {
-        method: 'POST',
-        // Sin cabecera Content-Type explícita para evitar problemas de CORS con Apps Script
-        body: JSON.stringify(cuerpo)
-      });
-    } catch(err){
-      console.error('No se pudo actualizar el stock en la hoja:', err);
+ async function descontarStockEnHoja(){
+  if(URL_HOJA.includes("PEGA_AQUI")) return false;
+
+  const cuerpo = {
+    carrito: carrito.map(item => ({ id: item.id, cantidad: item.cantidad }))
+  };
+
+  try{
+    const respuesta = await fetch(URL_HOJA, {
+      method: 'POST',
+      body: JSON.stringify(cuerpo)
+    });
+
+    const datos = await respuesta.json();
+
+    if (!datos.ok) {
+      if (datos.motivo === "sin_stock") {
+        alert(
+          "No hay stock suficiente:\n\n" +
+          datos.problemas.map(p =>
+            `${p.nombre}: pedido ${p.pedido}, disponible ${p.disponible}`
+          ).join("\n")
+        );
+        return false; // compra rechazada por falta de stock
+      }
+
+      alert("Error al procesar la compra. Inténtalo de nuevo.");
+      return false; // compra rechazada por otro motivo
     }
+
+    return true; // compra aceptada
+
+  } catch(err){
+    alert("No se pudo conectar con el servidor. Inténtalo más tarde.");
+    console.error('No se pudo actualizar el stock en la hoja:', err);
+    return false; // error de red
+  }
+}
+
+ btnPagar.addEventListener('click', async () => {
+  if(carrito.length === 0) return;
+  const total = calcularTotal().toFixed(2);
+
+  if(metodoActual === 'paypal'){
+    const url = `https://paypal.me/${USUARIO_PAYPAL}/${total}EUR`;
+    window.open(url, '_blank');
+  } else {
+    alert(`Para completar tu pedido, paga ${total.replace('.', ',')} € por Bizum al número ${NUMERO_BIZUM} y envíanos el justificante junto con tu nombre por WhatsApp.`);
   }
 
-  btnPagar.addEventListener('click', async () => {
-    if(carrito.length === 0) return;
-    const total = calcularTotal().toFixed(2);
+  const ok = await descontarStockEnHoja();
+  if (!ok) return; // SI EL BACKEND RECHAZA LA COMPRA, NO SIGUE
 
-    if(metodoActual === 'paypal'){
-      const url = `https://paypal.me/${USUARIO_PAYPAL}/${total}EUR`;
-      window.open(url, '_blank');
-    } else {
-      alert(`Para completar tu pedido, paga ${total.replace('.', ',')} € por Bizum al número ${NUMERO_BIZUM} y envíanos el justificante junto con tu nombre por WhatsApp.`);
-    }
-
-    // Se descuenta el stock en el momento de confirmar el pedido
-    // (no hay forma gratuita de esperar a la confirmación real del banco)
-    await descontarStockEnHoja();
-    carrito = [];
-    cerrarPanel();
-    await cargarProductos({ silencioso: true }); // recarga el stock actualizado desde la hoja
-  });
+  carrito = [];
+  cerrarPanel();
+  await cargarProductos({ silencioso: true });
+});
 
   seleccionarMetodo('paypal');
   cargarProductos();
